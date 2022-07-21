@@ -1,0 +1,63 @@
+Description: CFN template to create Windows Server EC2 with necessary setup to run Jenkins
+
+Resources:
+  JenkinLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName:  JenkinLaunchTemplate
+      LaunchTemplateData:
+        InstanceType: t2.large
+        KeyName: JenkinServerWali
+        SecurityGroupIds:
+          - !GetAtt SecurityGroupJenkins.GroupId
+
+  JenkinInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-05912b6333beaa478
+      LaunchTemplate:
+        LaunchTemplateId: !Ref JenkinLaunchTemplate
+        Version: !GetAtt JenkinLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: JenkinWebInstance
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          CD C:\Windows\system32
+          $Path = $env:TEMP; $Installer = "chrome_installer.exe"; Invoke-WebRequest "http://dl.google.com/chrome/install/375.126/chrome_installer.exe" -OutFile $Path\$Installer; Start-Process -FilePath $Path\$Installer -Args "/silent /install" -Verb RunAs -Wait; Remove-Item $Path\$Installer
+          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          choco install -y git
+          Set-Location -path 'C:\Users\Administrator'
+          choco install jdk8 -y
+          choco install maven -y
+          Invoke-WebRequest https://wali1317.s3.amazonaws.com/jenkins.msi -O jenkins.msi
+          Start-Process -Wait -FilePath msiexec -ArgumentList /i, "C:\Users\Administrator\jenkins.msi", 'INSTALLDIR="C:\Program Files\Jenkins"', /quiet -Verb RunAs
+          netsh advfirewall firewall add rule name="TCP Port 8080" dir=in action=allow protocol=TCP localport=8080
+          </powershell>
+
+  EIPForJenkin:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref JenkinInstance
+      Tags:
+        - Key: Name
+          Value: EIPForJenkins
+
+  SecurityGroupJenkins:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group to allow rdp and jenkins
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp:  0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp:  0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: 8
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
